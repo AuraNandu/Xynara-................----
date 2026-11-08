@@ -10,9 +10,7 @@ binding = "ASSETS"
 APP_NAME = "XYNARA"
 ADMIN_PASSWORD = "AuraNandu_2012"
 
-# NOTE: D1 + Durable Object bindings are added in Dashboard, NOT here.
-# Go to Workers > xynara > Settings > Bindings:
+# D1 + Durable Object bindings are added in Dashboard, NOT here.
+# Workers > xynara > Settings > Bindings:
 # - D1 Database: Variable DB -> xynara-db
 # - Durable Object: Variable ROOM -> Class ChatRoom
-# If you put a fake database_id here, deploy FAILS with "error occurred while running deploy command".
-# That's why this file has NO database_id.
