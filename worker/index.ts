@@ -1,4 +1,4 @@
-// XYNARA REAL - Worker + D1 + Durable Objects - ADMIN FIX V2
+// XYNARA REAL - Worker + D1 + Durable Objects - ADMIN LOGIN FIX
 export interface Env { DB: D1Database; ROOM: DurableObjectNamespace; ADMIN_PASSWORD: string; ASSETS: Fetcher; }
 
 export class ChatRoom {
@@ -33,7 +33,6 @@ async function hashPw(pw:string,salt:string){ const e=new TextEncoder(); const b
 function badFilter(t:string){ const bad=['fuck','shit','bitch','dick','porn','sex','fucking']; let o=t; let f=false; for(const w of bad){ if(o.toLowerCase().includes(w)){ f=true; o=o.split(new RegExp(w,'gi')).join('***'); } } return {text:o,flagged:f}; }
 async function getUser(env:Env,req:Request){ const a=req.headers.get('Authorization')||''; const tok=a.replace('Bearer ',''); if(!tok) return null; const s:any=await env.DB.prepare('SELECT * FROM sessions WHERE token=? AND expires_at>?').bind(tok,Date.now()).first(); if(!s) return null; const u:any=await env.DB.prepare('SELECT id,username,rank,banned,avatar_emoji FROM users WHERE id=?').bind(s.user_id).first(); if(!u||u.banned) return null; return {...u,token:tok}; }
 
-// --- ADMIN FIX: accept BOTH Secret AND fallback, trim spaces ---
 const FALLBACK_ADMIN = "AuraNandu_2012";
 function isAdmin(env:Env, input:any){
   const p = String(input||"").trim();
@@ -48,16 +47,17 @@ export default {
   if(url.pathname==='/ws'){ const room=url.searchParams.get('room')||'general'; const id=env.ROOM.idFromName(room); return env.ROOM.get(id).fetch(request); }
   if(url.pathname.startsWith('/api/')){
    const path=url.pathname.replace('/api','');
-   if(path==='/health') return j({ok:true,real:true,app:'XYNARA'});
+   if(path==='/health') return j({ok:true,app:'XYNARA'});
    if(path==='/debug'){
      try{
        if(!env.DB) return j({error:'DB binding MISSING', hasDB:false},500);
        const tables:any = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
        let usersCount = 0;
-       try{ const c:any = await env.DB.prepare('SELECT COUNT(*) as c FROM users').first(); usersCount = c.c; }catch(e:any){ return j({error:'users table MISSING', details:String(e), tables:tables.results, hasDB:true},500); }
-       return j({ok:true, hasDB:true, tables:tables.results.map((t:any)=>t.name), usersCount, adminPasswordSet: true, secretLength: String((env as any).ADMIN_PASSWORD||"").length, secretLengthTrimmed: String((env as any).ADMIN_PASSWORD||"").trim().length});
+       try{ const c:any = await env.DB.prepare('SELECT COUNT(*) as c FROM users').first(); usersCount = c.c; }catch(e:any){ return j({error:'users table MISSING', details:String(e)},500); }
+       return j({ok:true, hasDB:true, tables:tables.results.map((t:any)=>t.name), usersCount, adminPasswordSet:true});
      }catch(e:any){ return j({error:'DEBUG FAILED', details:String(e)},500); }
    }
+   // --- PUBLIC AUTH - BEFORE login check ---
    if(path==='/auth/signup'&&request.method==='POST'){ try{
     const {username,password}=await request.json() as any;
     if(!username||!password||username.length<3||password.length<4) return j({error:'Username min 3, password min 4'},400);
@@ -77,6 +77,10 @@ export default {
     const token=crypto.randomUUID(); await env.DB.prepare('INSERT INTO sessions (token,user_id,expires_at) VALUES (?,?,?)').bind(token,user.id,Date.now()+1000*60*60*24*7).run();
     return j({user:{id:user.id,username:user.username,rank:user.rank},token});
    }
+   // --- ADMIN LOGIN - ALSO BEFORE login check (THIS WAS THE BUG) ---
+   if(path==='/admin/login'&&request.method==='POST'){ const body:any=await request.json().catch(()=>({})); const pwd=body.password||body.adminPass||body.pass||""; if(!isAdmin(env,pwd)) return j({error:'Wrong admin password'},401); return j({ok:true}); }
+
+   // --- Everything below needs user login ---
    if(path==='/me'){ const u=await getUser(env,request); if(!u) return j({error:'Invalid token'},401); return j({user:u}); }
    const me=await getUser(env,request); if(!me) return j({error:'Login required'},401);
    if(path==='/users') { const {results}=await env.DB.prepare('SELECT id,username,rank,avatar_emoji,created_at FROM users WHERE banned=0 ORDER BY created_at LIMIT 200').all(); return j({users:results}); }
@@ -87,7 +91,6 @@ export default {
    if(path.startsWith('/groups/')&&path.endsWith('/channels')){ const gid=path.split('/')[2]; const {results}=await env.DB.prepare('SELECT * FROM channels WHERE group_id=?').bind(gid).all(); return j({channels:results}); }
    if(path==='/messages'&&request.method==='GET'){ const ch=url.searchParams.get('channelId'); const dm=url.searchParams.get('dm'); const after=url.searchParams.get('after')||'0'; let res:any; if(dm){ const key=[me.username,dm].sort().join(':'); res=await env.DB.prepare('SELECT * FROM messages WHERE dm_key=? AND created_at>? ORDER BY created_at ASC LIMIT 200').bind(key,Number(after)).all(); } else if(ch){ res=await env.DB.prepare('SELECT * FROM messages WHERE channel_id=? AND created_at>? ORDER BY created_at ASC LIMIT 200').bind(ch,Number(after)).all(); } else { res=await env.DB.prepare('SELECT * FROM messages WHERE created_at>? ORDER BY created_at ASC LIMIT 200').bind(Number(after)).all(); } return j({messages:res.results}); }
    if(path==='/messages'&&request.method==='POST'){ const {content,channelId,dmTo}=await request.json() as any; if(!content||!content.trim()) return j({error:'Empty'},400); const f=badFilter(content); const id=crypto.randomUUID(); let dmKey=null; if(dmTo) dmKey=[me.username,dmTo].sort().join(':'); await env.DB.prepare('INSERT INTO messages (id,channel_id,dm_key,sender_id,sender_name,content,flagged,created_at) VALUES (?,?,?,?,?,?,?,?)').bind(id,channelId||null,dmKey,me.id,me.username,f.text,f.flagged?1:0,Date.now()).run(); return j({ok:true,flagged:f.flagged,content:f.text,id}); }
-   if(path==='/admin/login'&&request.method==='POST'){ const body:any=await request.json().catch(()=>({})); const pwd=body.password||body.adminPass||body.pass||""; if(!isAdmin(env,pwd)) return j({error:'Wrong admin password'},401); return j({ok:true}); }
    if(path==='/admin/users'&&request.method==='GET'){ const pwd=url.searchParams.get('adminPass')||''; if(!isAdmin(env,pwd)) return j({error:'Admin only'},401); const {results}=await env.DB.prepare('SELECT id,username,rank,banned,created_at FROM users ORDER BY created_at').all(); return j({users:results}); }
    if(path==='/admin/action'&&request.method==='POST'){ const body:any=await request.json() as any; const ap=body.adminPass||body.password||""; if(!isAdmin(env,ap)) return j({error:'Admin only'},401); const {action,target,rank}=body; if(action==='ban') await env.DB.prepare('UPDATE users SET banned=1 WHERE username=?').bind(target).run(); if(action==='unban') await env.DB.prepare('UPDATE users SET banned=0 WHERE username=?').bind(target).run(); if(action==='set_rank') await env.DB.prepare('UPDATE users SET rank=? WHERE username=?').bind(rank,target).run(); if(action==='delete_message') await env.DB.prepare('DELETE FROM messages WHERE id=?').bind(target).run(); return j({ok:true}); }
    if(path==='/admin/all-messages'&&request.method==='GET'){ const pwd=url.searchParams.get('adminPass')||''; if(!isAdmin(env,pwd)) return j({error:'Admin only'},401); const {results}=await env.DB.prepare('SELECT * FROM messages ORDER BY created_at DESC LIMIT 300').all(); return j({messages:results}); }
