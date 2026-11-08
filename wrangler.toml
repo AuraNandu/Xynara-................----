@@ -4,13 +4,24 @@ compatibility_date = "2024-10-01"
 
 [assets]
 directory = "./frontend"
-binding = "4a12543d-1316-408c-80dd-4dc32fd16c98"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "xynara-db"
+database_id = "4a12543d-1316-408c-80dd-4dc32fd16c98"
+migrations_dir = "migrations"
+
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "ChatRoom"
+
+[[migrations]]
+new_sqlite_classes = ["ChatRoom"]
+tag = "v1"
 
 [vars]
 APP_NAME = "XYNARA"
-ADMIN_PASSWORD = "AuraNandu_2012"
-
-# D1 + Durable Object bindings are added in Dashboard, NOT here.
-# Workers > xynara > Settings > Bindings:
-# - D1 Database: Variable DB -> xynara-db
-# - Durable Object: Variable ROOM -> Class ChatRoom
+# ADMIN_PASSWORD is NOT here on purpose - keep it SECRET
+# Set it in Cloudflare > Workers > xynara > Settings > Variables > Add Secret
+# Name: ADMIN_PASSWORD | Value: AuraNandu_2012
